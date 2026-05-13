@@ -60,16 +60,23 @@ function normalizeUrl(u: string): string {
   return u.trim().replace(/\/+$/, '')
 }
 
-const _initialOverrides = readOverrides()
+function envFlag(name: string, defaultValue = false): boolean {
+  const raw = process.env[name]
+  if (raw === undefined) return defaultValue
+  return ['1', 'true', 'yes', 'on'].includes(raw.trim().toLowerCase())
+}
+
+const FORCE_ENV_URLS = envFlag('HERMES_FORCE_ENV_URLS')
+const _initialOverrides = FORCE_ENV_URLS ? {} : readOverrides()
 
 export let CLAUDE_API = normalizeUrl(
-  _initialOverrides.claudeApiUrl ||
+  (FORCE_ENV_URLS ? process.env.HERMES_API_URL || process.env.CLAUDE_API_URL : _initialOverrides.claudeApiUrl) ||
     process.env.HERMES_API_URL ||
     process.env.CLAUDE_API_URL ||
     'http://127.0.0.1:8642',
 )
 export let CLAUDE_DASHBOARD_URL = normalizeUrl(
-  _initialOverrides.claudeDashboardUrl ||
+  (FORCE_ENV_URLS ? process.env.HERMES_DASHBOARD_URL || process.env.CLAUDE_DASHBOARD_URL : _initialOverrides.claudeDashboardUrl) ||
     process.env.HERMES_DASHBOARD_URL ||
     process.env.CLAUDE_DASHBOARD_URL ||
     'http://127.0.0.1:9119',
@@ -127,7 +134,7 @@ export function getResolvedUrls(): {
   dashboard: string
   source: 'override' | 'env' | 'default'
 } {
-  const overrides = readOverrides()
+  const overrides = FORCE_ENV_URLS ? {} : readOverrides()
   const source = overrides.claudeApiUrl
     ? 'override'
     : (process.env.HERMES_API_URL || process.env.CLAUDE_API_URL)
@@ -596,12 +603,22 @@ async function probeDashboard(): Promise<{ available: boolean; url: string }> {
     const res = await fetch(`${CLAUDE_DASHBOARD_URL}/api/status`, {
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     })
-    if (!res.ok) return { available: false, url: CLAUDE_DASHBOARD_URL }
+    if (!res.ok) {
+      console.warn(`[gateway] dashboard probe failed url=${CLAUDE_DASHBOARD_URL} status=${res.status}`)
+      return { available: false, url: CLAUDE_DASHBOARD_URL }
+    }
     const body = (await res.json()) as { version?: string }
-    if (!body.version) return { available: false, url: CLAUDE_DASHBOARD_URL }
-    await fetchDashboardToken().catch(() => '')
+    if (!body.version) {
+      console.warn(`[gateway] dashboard probe failed url=${CLAUDE_DASHBOARD_URL} reason=missing-version`)
+      return { available: false, url: CLAUDE_DASHBOARD_URL }
+    }
+    await fetchDashboardToken().catch((error) => {
+      console.warn(`[gateway] dashboard token probe failed url=${CLAUDE_DASHBOARD_URL} error=${String(error)}`)
+      return ''
+    })
     return { available: true, url: CLAUDE_DASHBOARD_URL }
-  } catch {
+  } catch (error) {
+    console.warn(`[gateway] dashboard probe failed url=${CLAUDE_DASHBOARD_URL} error=${String(error)}`)
     return { available: false, url: CLAUDE_DASHBOARD_URL }
   }
 }

@@ -30,7 +30,10 @@ FROM node:22-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl tini python3 \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd -r workspace && useradd -r -g workspace -u 10010 workspace
+    && groupadd -r workspace \
+    && useradd -r -g workspace -u 10010 -m -d /home/workspace -s /bin/bash workspace \
+    && mkdir -p /home/workspace/.hermes /home/workspace/workspace \
+    && chown -R workspace:workspace /home/workspace
 
 WORKDIR /app
 
@@ -47,6 +50,10 @@ COPY --from=build --chown=workspace:workspace /app/skills ./skills
 
 USER workspace
 ENV NODE_ENV=production \
+    HOME=/home/workspace \
+    HERMES_HOME=/home/workspace/.hermes \
+    HERMES_WORKSPACE_DIR=/home/workspace/workspace \
+    HERMES_FORCE_ENV_URLS=1 \
     PORT=3000 \
     HOST=0.0.0.0 \
     HERMES_API_URL=http://hermes-agent:8642
