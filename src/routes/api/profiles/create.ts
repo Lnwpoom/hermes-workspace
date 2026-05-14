@@ -3,6 +3,12 @@ import { json } from '@tanstack/react-start'
 import { isAuthenticated } from '../../../server/auth-middleware'
 import { createProfile } from '../../../server/profiles-browser'
 import { requireJsonContentType } from '../../../server/rate-limit'
+import {
+  messageFromBridgeError,
+  remoteCreateProfile,
+  remoteStateEnabled,
+  statusFromBridgeError,
+} from '../../../server/workspace-state-client'
 
 export const Route = createFileRoute('/api/profiles/create')({
   server: {
@@ -20,6 +26,9 @@ export const Route = createFileRoute('/api/profiles/create')({
             model?: string
             provider?: string
           }
+          if (remoteStateEnabled()) {
+            return json(await remoteCreateProfile(body))
+          }
           return json({
             ok: true,
             profile: createProfile(body.name || '', {
@@ -31,12 +40,9 @@ export const Route = createFileRoute('/api/profiles/create')({
         } catch (error) {
           return json(
             {
-              error:
-                error instanceof Error
-                  ? error.message
-                  : 'Failed to create profile',
+              error: messageFromBridgeError(error, 'Failed to create profile'),
             },
-            { status: 500 },
+            { status: statusFromBridgeError(error) },
           )
         }
       },

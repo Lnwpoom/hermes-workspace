@@ -3,6 +3,12 @@ import { json } from '@tanstack/react-start'
 import { isAuthenticated } from '../../../server/auth-middleware'
 import { deleteProfile } from '../../../server/profiles-browser'
 import { requireJsonContentType } from '../../../server/rate-limit'
+import {
+  messageFromBridgeError,
+  remoteDeleteProfile,
+  remoteStateEnabled,
+  statusFromBridgeError,
+} from '../../../server/workspace-state-client'
 
 export const Route = createFileRoute('/api/profiles/delete')({
   server: {
@@ -15,17 +21,17 @@ export const Route = createFileRoute('/api/profiles/delete')({
         if (csrfCheck) return csrfCheck
         try {
           const body = (await request.json()) as { name?: string }
+          if (remoteStateEnabled()) {
+            return json(await remoteDeleteProfile(body.name || ''))
+          }
           deleteProfile(body.name || '')
           return json({ ok: true })
         } catch (error) {
           return json(
             {
-              error:
-                error instanceof Error
-                  ? error.message
-                  : 'Failed to delete profile',
+              error: messageFromBridgeError(error, 'Failed to delete profile'),
             },
-            { status: 500 },
+            { status: statusFromBridgeError(error) },
           )
         }
       },

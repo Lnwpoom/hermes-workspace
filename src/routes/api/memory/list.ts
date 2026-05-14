@@ -2,6 +2,12 @@ import { createFileRoute } from '@tanstack/react-router'
 import { json } from '@tanstack/react-start'
 import { isAuthenticated } from '../../../server/auth-middleware'
 import { listMemoryFiles } from '../../../server/memory-browser'
+import {
+  messageFromBridgeError,
+  remoteListMemoryFiles,
+  remoteStateEnabled,
+  statusFromBridgeError,
+} from '../../../server/workspace-state-client'
 
 export const Route = createFileRoute('/api/memory/list')({
   server: {
@@ -10,20 +16,17 @@ export const Route = createFileRoute('/api/memory/list')({
         if (!isAuthenticated(request)) {
           return json({ error: 'Unauthorized' }, { status: 401 })
         }
-        // Memory is sourced entirely from local filesystem via memory-browser.ts
-        // (reads $HERMES_HOME/MEMORY.md + $HERMES_HOME/memory/ + /memories/). No
-        // remote gateway endpoint is required, so no capability gate is needed.
         try {
+          if (remoteStateEnabled()) {
+            return json(await remoteListMemoryFiles())
+          }
           return json({ files: listMemoryFiles() })
         } catch (error) {
           return json(
             {
-              error:
-                error instanceof Error
-                  ? error.message
-                  : 'Failed to list memory files',
+              error: messageFromBridgeError(error, 'Failed to list memory files'),
             },
-            { status: 500 },
+            { status: statusFromBridgeError(error) },
           )
         }
       },

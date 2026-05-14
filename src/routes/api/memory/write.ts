@@ -5,6 +5,12 @@ import { json } from '@tanstack/react-start'
 import { isAuthenticated } from '../../../server/auth-middleware'
 import { getMemoryWorkspaceRoot } from '../../../server/memory-browser'
 import { requireJsonContentType } from '../../../server/rate-limit'
+import {
+  messageFromBridgeError,
+  remoteStateEnabled,
+  remoteWriteMemoryFile,
+  statusFromBridgeError,
+} from '../../../server/workspace-state-client'
 
 function validateMemoryWritePath(inputPath: unknown): {
   relativePath: string
@@ -42,12 +48,13 @@ export const Route = createFileRoute('/api/memory/write')({
         }
         const csrfCheck = requireJsonContentType(request)
         if (csrfCheck) return csrfCheck
-        // Memory writes go directly to local fs ($HERMES_HOME/memory/...).
-        // No remote gateway endpoint is involved.
         try {
           const body = (await request.json().catch(() => ({}))) as {
             path?: unknown
             content?: unknown
+          }
+          if (remoteStateEnabled()) {
+            return json(await remoteWriteMemoryFile(body))
           }
           const { relativePath, fullPath } = validateMemoryWritePath(body.path)
           const content = typeof body.content === 'string' ? body.content : ''
@@ -56,14 +63,12 @@ export const Route = createFileRoute('/api/memory/write')({
           fs.writeFileSync(fullPath, content, 'utf-8')
           return json({ success: true, path: relativePath })
         } catch (error) {
-          const message =
-            error instanceof Error
-              ? error.message
-              : 'Failed to write memory file'
+          const message = messageFromBridgeError(error, 'Failed to write memory file')
           const status =
-            /required|absolute|traversal|outside workspace|\.md/i.test(message)
+            statusFromBridgeError(error, 0) ||
+            (/required|absolute|traversal|outside workspace|\.md/i.test(message)
               ? 400
-              : 500
+              : 500)
           return json({ error: message }, { status })
         }
       },

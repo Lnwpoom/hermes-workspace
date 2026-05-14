@@ -5,6 +5,12 @@ import {
   getActiveProfileName,
   listProfiles,
 } from '../../../server/profiles-browser'
+import {
+  messageFromBridgeError,
+  remoteListProfiles,
+  remoteStateEnabled,
+  statusFromBridgeError,
+} from '../../../server/workspace-state-client'
 
 export const Route = createFileRoute('/api/profiles/list')({
   server: {
@@ -14,6 +20,9 @@ export const Route = createFileRoute('/api/profiles/list')({
           return json({ error: 'Unauthorized' }, { status: 401 })
         }
         try {
+          if (remoteStateEnabled()) {
+            return json(await remoteListProfiles())
+          }
           return json({
             profiles: listProfiles(),
             activeProfile: getActiveProfileName(),
@@ -21,13 +30,10 @@ export const Route = createFileRoute('/api/profiles/list')({
         } catch (error) {
           return json(
             {
-              error:
-                error instanceof Error
-                  ? error.message
-                  : 'Failed to list profiles',
+              error: messageFromBridgeError(error, 'Failed to list profiles'),
               profiles: [],
             },
-            { status: 500 },
+            { status: statusFromBridgeError(error) },
           )
         }
       },
