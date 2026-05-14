@@ -285,9 +285,15 @@ export const BEARER_TOKEN = process.env.HERMES_API_TOKEN || process.env.CLAUDE_A
  * fetchDashboardToken() fall through to the HTML-scrape legacy path.
  */
 const DASHBOARD_BEARER_TOKEN = process.env.HERMES_DASHBOARD_TOKEN || process.env.CLAUDE_DASHBOARD_TOKEN || ''
+const DASHBOARD_BRIDGE_TOKEN =
+  process.env.HERMES_DASHBOARD_BRIDGE_TOKEN || process.env.HERMES_API_TOKEN || process.env.CLAUDE_API_TOKEN || ''
 
 function authHeaders(): Record<string, string> {
   return BEARER_TOKEN ? { Authorization: `Bearer ${BEARER_TOKEN}` } : {}
+}
+
+function dashboardBridgeHeaders(): Record<string, string> {
+  return DASHBOARD_BRIDGE_TOKEN ? { 'X-Hermes-Bridge-Token': DASHBOARD_BRIDGE_TOKEN } : {}
 }
 
 let loggedHtmlScrapeFallback = false
@@ -328,6 +334,7 @@ export async function fetchDashboardToken(options?: {
     // Dashboard injects the session token inline on `/` (root), not on
     // `/index.html` which serves the raw Vite-built HTML without the token.
     const res = await fetch(`${CLAUDE_DASHBOARD_URL}/`, {
+      headers: dashboardBridgeHeaders(),
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     })
     if (!res.ok) {
@@ -384,6 +391,10 @@ export async function dashboardFetch(
       !requestPath.endsWith('/api/dashboard/themes') &&
       !requestPath.endsWith('/api/dashboard/plugins') &&
       !requestPath.endsWith('/api/dashboard/plugins/rescan')
+
+    for (const [key, value] of Object.entries(dashboardBridgeHeaders())) {
+      if (!headers.has(key)) headers.set(key, value)
+    }
 
     if (isProtected && !headers.has('Authorization')) {
       const auth = await dashboardAuthHeaders({ force: forceToken })
@@ -601,6 +612,7 @@ async function probeMcpConfigKey(): Promise<boolean> {
 async function probeDashboard(): Promise<{ available: boolean; url: string }> {
   try {
     const res = await fetch(`${CLAUDE_DASHBOARD_URL}/api/status`, {
+      headers: dashboardBridgeHeaders(),
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     })
     if (!res.ok) {
