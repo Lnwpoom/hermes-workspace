@@ -586,6 +586,16 @@ export function isLocalhostDeployment(): boolean {
   return isLoopbackUrl(CLAUDE_API) && isLoopbackUrl(CLAUDE_DASHBOARD_URL)
 }
 
+export function isSecureBridgeDeployment(): boolean {
+  if (!DASHBOARD_BRIDGE_TOKEN) return false
+  try {
+    const url = new URL(CLAUDE_DASHBOARD_URL)
+    return url.pathname.includes('/workspace-dashboard')
+  } catch {
+    return false
+  }
+}
+
 /**
  * Probe whether the dashboard's `/api/config` payload includes an
  * `mcp_servers` entry. The presence of the key (even if empty) signals that
@@ -838,15 +848,19 @@ export async function probeGateway(options?: {
     const kanban = await probeKanban(dashboard.available)
 
     // Phase 1.5 fallback: when native /api/mcp is missing but the dashboard
-    // exposes `config.mcp_servers` AND we are loopback-only, allow a config
-    // -backed CRUD path. Test/Discover/Logs remain disabled in this mode.
+    // config route is reachable, allow config-backed CRUD in two safe cases:
+    // loopback development, or the Railway workspace-dashboard bridge protected
+    // by HERMES_DASHBOARD_BRIDGE_TOKEN. Test/Discover/Logs still require the
+    // native /api/mcp runtime endpoint.
     const dashboardConfigAvailable = dashboard.available || legacyConfig
+    const secureBridgeDeployment = isSecureBridgeDeployment()
+    const mcpConfigKeyAvailable = await probeMcpConfigKey()
     const mcpFallback =
       !mcp &&
       dashboard.available &&
       dashboardConfigAvailable &&
-      isLocalhostDeployment() &&
-      (await probeMcpConfigKey())
+      (isLocalhostDeployment() || secureBridgeDeployment) &&
+      (mcpConfigKeyAvailable || secureBridgeDeployment)
 
     capabilities = {
       health,
@@ -857,9 +871,9 @@ export async function probeGateway(options?: {
       sessions: dashboard.available || legacySessions,
       enhancedChat,
       skills: dashboard.available || legacySkills,
-      // Memory is always available: workspace reads $HERMES_HOME/MEMORY.md +
-      // memory/*.md + memories/*.md directly from the local filesystem.
-      // No remote gateway endpoint is required.
+      // Memory browser is available: in Railway bridge mode the Workspace
+      // reads/writes the main service's HERMES_HOME through /workspace-state;
+      // otherwise it falls back to local $HERMES_HOME memory files.
       memory: true,
       config: dashboard.available || legacyConfig,
       jobs: dashboard.available || legacyJobs,
