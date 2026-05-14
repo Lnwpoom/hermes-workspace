@@ -104,19 +104,29 @@ export function createTerminalSession(params: {
     }
   }
 
+  const childEnv = {
+    ...process.env,
+    ...params.env,
+  } as Record<string, string>
+  if (!childEnv.HERMES_DASHBOARD_BRIDGE_TOKEN) {
+    const fallbackBridgeToken = childEnv.HERMES_API_TOKEN || childEnv.CLAUDE_API_TOKEN
+    if (fallbackBridgeToken) {
+      childEnv.HERMES_DASHBOARD_BRIDGE_TOKEN = fallbackBridgeToken
+    }
+  }
+
   // Spawn Python PTY helper
   const proc: ChildProcess = spawn(
     'python3',
     [PTY_HELPER, cwd, String(cols), String(rows), '--', ...command],
     {
       env: {
-        ...process.env,
-        ...params.env,
+        ...childEnv,
         TERM: 'xterm-256color',
         COLORTERM: 'truecolor',
         COLUMNS: String(cols),
         LINES: String(rows),
-      } as Record<string, string>,
+      },
       stdio: ['pipe', 'pipe', 'pipe'],
     },
   )
