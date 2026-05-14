@@ -16,6 +16,15 @@ import {
   safeErrorMessage,
 } from '../../server/rate-limit'
 import { loadWorkspaceCatalog } from './workspace'
+import {
+  messageFromBridgeError,
+  remoteDownloadWorkspaceFile,
+  remoteListWorkspaceFiles,
+  remoteReadWorkspaceFile,
+  remoteStateEnabled,
+  remoteWriteWorkspaceFile,
+  statusFromBridgeError,
+} from '../../server/workspace-state-client'
 
 const execFileAsync = promisify(execFile)
 
@@ -262,6 +271,34 @@ export const Route = createFileRoute('/api/files')({
             url.searchParams.get('maxEntries'),
           )
 
+          if (remoteStateEnabled()) {
+            try {
+              if (action === 'read') {
+                return json(await remoteReadWorkspaceFile(inputPath))
+              }
+              if (action === 'download') {
+                return await remoteDownloadWorkspaceFile(inputPath)
+              }
+              return json(
+                await remoteListWorkspaceFiles({
+                  path: inputPath,
+                  maxDepth: maxDepthParam,
+                  maxEntries: maxEntriesParam,
+                }),
+              )
+            } catch (bridgeErr) {
+              return json(
+                {
+                  error: messageFromBridgeError(
+                    bridgeErr,
+                    'Workspace files bridge failed',
+                  ),
+                },
+                { status: statusFromBridgeError(bridgeErr) },
+              )
+            }
+          }
+
           const workspaceRoot = await getWorkspaceRoot()
 
           if (action === 'list' && hasGlob(inputPath)) {
@@ -332,8 +369,55 @@ export const Route = createFileRoute('/api/files')({
         }
 
         try {
-          const workspaceRoot = await getWorkspaceRoot()
           const contentType = request.headers.get('content-type') || ''
+
+          if (remoteStateEnabled()) {
+            try {
+              if (!contentType.includes('multipart/form-data')) {
+                const csrfCheck = requireJsonContentType(request)
+                if (csrfCheck) return csrfCheck
+              }
+              if (contentType.includes('multipart/form-data')) {
+                const form = await request.formData()
+                const action = String(form.get('action') || 'upload')
+                if (action !== 'upload') {
+                  return json({ error: 'Invalid upload request' }, { status: 400 })
+                }
+                const file = form.get('file')
+                const targetPath = String(form.get('path') || '')
+                if (!(file instanceof File)) {
+                  return json({ error: 'Missing file' }, { status: 400 })
+                }
+                const buffer = Buffer.from(await file.arrayBuffer())
+                return json(
+                  await remoteWriteWorkspaceFile({
+                    action: 'upload',
+                    path: targetPath,
+                    name: file.name,
+                    contentBase64: buffer.toString('base64'),
+                  }),
+                )
+              }
+
+              const body = (await request.json().catch(() => ({}))) as Record<
+                string,
+                unknown
+              >
+              return json(await remoteWriteWorkspaceFile(body))
+            } catch (bridgeErr) {
+              return json(
+                {
+                  error: messageFromBridgeError(
+                    bridgeErr,
+                    'Workspace files bridge failed',
+                  ),
+                },
+                { status: statusFromBridgeError(bridgeErr) },
+              )
+            }
+          }
+
+          const workspaceRoot = await getWorkspaceRoot()
           if (!contentType.includes('multipart/form-data')) {
             const csrfCheck = requireJsonContentType(request)
             if (csrfCheck) return csrfCheck

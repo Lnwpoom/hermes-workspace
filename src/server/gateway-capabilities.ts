@@ -264,6 +264,7 @@ let lastProbeAt = 0
 let lastLoggedSummary = ''
 let dashboardTokenPromise: Promise<string> | null = null
 let dashboardTokenCache = ''
+let legacyEnhancedChatAvailable = false
 
 /** Optional bearer token for authenticated gateway endpoints. */
 export const BEARER_TOKEN = process.env.HERMES_API_TOKEN || process.env.CLAUDE_API_TOKEN || ''
@@ -821,7 +822,7 @@ export async function probeGateway(options?: {
       chatCompletions,
       models,
       legacySessions,
-      enhancedChat,
+      legacyEnhancedChat,
       legacySkills,
       legacyConfig,
       legacyJobs,
@@ -837,6 +838,10 @@ export async function probeGateway(options?: {
       probe('/api/jobs'),
       probeDashboard(),
     ])
+
+    legacyEnhancedChatAvailable = legacyEnhancedChat
+    const responsesEnhancedChat = envFlag('HERMES_USE_RESPONSES') && chatCompletions
+    const enhancedChat = legacyEnhancedChat || responsesEnhancedChat
 
     // Strict MCP probe runs after dashboard probe so dashboard token
     // resolution (in-page HTML scrape fallback) has had a chance to populate
@@ -966,8 +971,12 @@ export function getGatewayMode(): GatewayMode {
  * - portable: OpenAI-compatible /v1/chat/completions transport
  * - disconnected: no usable chat backend
  */
+export function hasLegacySessionChat(): boolean {
+  return legacyEnhancedChatAvailable
+}
+
 export function getChatMode(): ChatMode {
-  if (capabilities.enhancedChat) return 'enhanced-claude'
+  if (capabilities.enhancedChat && hasLegacySessionChat()) return 'enhanced-claude'
   if (capabilities.chatCompletions || capabilities.health) return 'portable'
   return 'disconnected'
 }

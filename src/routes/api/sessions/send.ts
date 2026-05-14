@@ -9,6 +9,7 @@ import {
   getGatewayCapabilities,
   sendChat,
 } from '../../../server/claude-api'
+import { hasLegacySessionChat } from '../../../server/gateway-capabilities'
 import { resolveSessionKey } from '../../../server/session-utils'
 
 export const Route = createFileRoute('/api/sessions/send')({
@@ -21,7 +22,7 @@ export const Route = createFileRoute('/api/sessions/send')({
         const csrfCheck = requireJsonContentType(request)
         if (csrfCheck) return csrfCheck
         const capabilities = await ensureGatewayProbed()
-        if (!capabilities.enhancedChat) {
+        if (!hasLegacySessionChat()) {
           return json(
             {
               ok: false,

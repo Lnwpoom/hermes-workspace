@@ -71,6 +71,32 @@ async function stateFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>
 }
 
+async function stateFetchRaw(path: string, init: RequestInit = {}): Promise<Response> {
+  const base = workspaceStateBaseUrl()
+  if (!base) {
+    throw new WorkspaceStateBridgeError('Workspace state bridge is not configured', 503)
+  }
+  if (!STATE_BRIDGE_TOKEN) {
+    throw new WorkspaceStateBridgeError('Workspace state bridge token is missing', 503)
+  }
+
+  const headers = new Headers(init.headers)
+  headers.set(STATE_BRIDGE_HEADER, STATE_BRIDGE_TOKEN)
+
+  const response = await fetch(`${base}${path}`, {
+    ...init,
+    headers,
+  })
+  if (!response.ok) {
+    const body = (await response.clone().json().catch(() => null)) as unknown
+    throw new WorkspaceStateBridgeError(
+      remoteErrorMessage(body, `Workspace state bridge failed (${response.status})`),
+      response.status,
+    )
+  }
+  return response
+}
+
 function jsonRequest(body: unknown): RequestInit {
   return {
     method: 'POST',
@@ -143,6 +169,56 @@ export function remoteWriteMemoryFile(body: {
   content?: unknown
 }): Promise<{ success: boolean; path: string }> {
   return stateFetch('/memory/write', jsonRequest(body))
+}
+
+export type WorkspaceFileEntry = {
+  name: string
+  path: string
+  type: 'file' | 'folder'
+  size?: number
+  modifiedAt?: string
+  children?: Array<WorkspaceFileEntry>
+}
+
+export function remoteListWorkspaceFiles(params: {
+  path?: string
+  maxDepth?: number | null
+  maxEntries?: number | null
+} = {}): Promise<{
+  root: string
+  base: string
+  entries: Array<WorkspaceFileEntry>
+}> {
+  const query = new URLSearchParams({ action: 'list' })
+  if (params.path) query.set('path', params.path)
+  if (params.maxDepth !== null && params.maxDepth !== undefined) {
+    query.set('maxDepth', String(params.maxDepth))
+  }
+  if (params.maxEntries !== null && params.maxEntries !== undefined) {
+    query.set('maxEntries', String(params.maxEntries))
+  }
+  return stateFetch(`/files?${query.toString()}`)
+}
+
+export function remoteReadWorkspaceFile(path: string): Promise<{
+  type: 'text' | 'image'
+  path: string
+  content: string
+}> {
+  const query = new URLSearchParams({ action: 'read', path })
+  return stateFetch(`/files?${query.toString()}`)
+}
+
+export function remoteDownloadWorkspaceFile(path: string): Promise<Response> {
+  const query = new URLSearchParams({ action: 'download', path })
+  return stateFetchRaw(`/files?${query.toString()}`)
+}
+
+export function remoteWriteWorkspaceFile(body: Record<string, unknown>): Promise<{
+  ok: boolean
+  path?: string
+}> {
+  return stateFetch('/files', jsonRequest(body))
 }
 
 export function statusFromBridgeError(error: unknown, fallback = 500): number {
