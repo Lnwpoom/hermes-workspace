@@ -551,19 +551,15 @@ export const Route = createFileRoute('/api/send-stream')({
                       content: userContent,
                     },
                   ]
-                  // Vanilla Hermes Agent (>=v0.12.x) ships a structured
-                  // Responses-API streaming surface at POST /v1/responses
-                  // that carries full tool args + results, unlike the
-                  // /v1/chat/completions surface which only emits a thin
-                  // hermes.tool.progress lifecycle event. When the user
-                  // opts into the Responses path AND we're talking to the
-                  // local Hermes gateway (no localBaseUrl override), use
-                  // it so the TUI tool card can render INPUT JSON and
-                  // tool output text live during the run. Falls back
-                  // automatically on any error to the existing
-                  // openaiChat path.
+                  // The stable Railway path for Hermes Agent is
+                  // /v1/chat/completions. HERMES_USE_RESPONSES only advertises
+                  // enhanced workspace capability; it must not force the chat
+                  // transport because some Hermes gateway builds expose a
+                  // partial /v1/responses stream that emits response.failed.
+                  // Keep Responses as an explicit opt-in for debugging or
+                  // future builds that have been verified end-to-end.
                   const useResponsesApi =
-                    process.env.HERMES_USE_RESPONSES === '1' && !localBaseUrl
+                    process.env.HERMES_FORCE_RESPONSES === '1' && !localBaseUrl
                   if (useResponsesApi) {
                     let thinking = ''
                     // Track tool calls by callId so a `tool.completed`

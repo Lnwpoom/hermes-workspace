@@ -236,10 +236,13 @@ export async function* streamResponses(
           continue
         }
         if (eventType === 'response.failed') {
+          const errorPayload = parsed.error
           const err =
-            typeof parsed.error === 'string'
-              ? (parsed.error as string)
-              : 'Response failed'
+            typeof errorPayload === 'string'
+              ? errorPayload
+              : errorPayload && typeof errorPayload === 'object'
+                ? JSON.stringify(errorPayload)
+                : 'Response failed'
           yield { kind: 'failed', error: err }
           continue
         }
