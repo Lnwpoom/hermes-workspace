@@ -86,6 +86,21 @@ function buildReference(pathValue: string) {
   return `See file: workspace/${normalized}`
 }
 
+function getDownloadFileName(response: Response, fallback: string) {
+  const disposition = response.headers.get('content-disposition') || ''
+  const encodedMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (encodedMatch?.[1]) {
+    try {
+      return decodeURIComponent(encodedMatch[1])
+    } catch {
+      return encodedMatch[1]
+    }
+  }
+
+  const quotedMatch = disposition.match(/filename="?([^";]+)"?/i)
+  return quotedMatch?.[1] || fallback
+}
+
 async function fetchFileTree(): Promise<Array<FileEntry>> {
   const res = await fetch('/api/files?action=list')
   if (!res.ok) throw new Error('Failed to load files')
@@ -132,6 +147,7 @@ export function FileExplorerSidebar({
   const [previewPath, setPreviewPath] = useState<string | null>(null)
   const uploadTargetRef = useRef<string>('')
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
+  const folderUploadInputRef = useRef<HTMLInputElement | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -225,33 +241,66 @@ export function FileExplorerSidebar({
     [refresh],
   )
 
-  const handleDownload = useCallback(async (entry: FileEntry) => {
-    const res = await fetch(
-      `/api/files?action=download&path=${encodeURIComponent(entry.path)}`,
-    )
-    if (!res.ok) return
-    const blob = await res.blob()
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = entry.name
-    anchor.click()
-    URL.revokeObjectURL(url)
-  }, [])
+  const handleDownloadPath = useCallback(
+    async (pathValue: string, fallbackName: string) => {
+      const res = await fetch(
+        `/api/files?action=download&path=${encodeURIComponent(pathValue)}`,
+      )
+      if (!res.ok) return
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = getDownloadFileName(res, fallbackName)
+      anchor.click()
+      URL.revokeObjectURL(url)
+    },
+    [],
+  )
+
+  const handleDownload = useCallback(
+    (entry: FileEntry) =>
+      handleDownloadPath(
+        entry.path,
+        entry.type === 'folder' ? `${entry.name}.tar.gz` : entry.name,
+      ),
+    [handleDownloadPath],
+  )
+
+  const handleDownloadWorkspace = useCallback(
+    () => handleDownloadPath('', 'workspace.tar.gz'),
+    [handleDownloadPath],
+  )
 
   const handleUploadClick = useCallback((targetPath: string) => {
     uploadTargetRef.current = targetPath
     uploadInputRef.current?.click()
   }, [])
 
+  const handleUploadFolderClick = useCallback((targetPath: string) => {
+    uploadTargetRef.current = targetPath
+    const input = folderUploadInputRef.current
+    if (!input) return
+    input.setAttribute('webkitdirectory', '')
+    input.setAttribute('directory', '')
+    input.click()
+  }, [])
+
   const handleUploadChange = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(event.target.files || [])
       if (files.length === 0) return
+      const isFolderUpload =
+        event.currentTarget === folderUploadInputRef.current
       for (const file of files) {
         const form = new FormData()
+        const relativePath = isFolderUpload
+          ? (file as File & { webkitRelativePath?: string })
+              .webkitRelativePath || file.name
+          : ''
         form.append('action', 'upload')
         form.append('path', uploadTargetRef.current || '')
+        if (relativePath) form.append('relativePath', relativePath)
         form.append('file', file)
         await fetch('/api/files', { method: 'POST', body: form })
       }
@@ -394,10 +443,26 @@ export function FileExplorerSidebar({
           <Button
             size="icon-sm"
             variant="ghost"
+            onClick={() => void handleDownloadWorkspace()}
+            title="Download workspace"
+          >
+            <HugeiconsIcon icon={Download01Icon} size={18} />
+          </Button>
+          <Button
+            size="icon-sm"
+            variant="ghost"
             onClick={() => handleUploadClick('')}
-            title="Upload"
+            title="Upload files"
           >
             <HugeiconsIcon icon={Upload01Icon} size={18} />
+          </Button>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => handleUploadFolderClick('')}
+            title="Upload folder"
+          >
+            <HugeiconsIcon icon={Folder01Icon} size={18} />
           </Button>
           <Button
             size="icon-sm"
@@ -469,7 +534,7 @@ export function FileExplorerSidebar({
                   Create files or upload content to get started.
                 </p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap justify-center gap-2">
                 <Button
                   size="sm"
                   variant="outline"
@@ -486,7 +551,15 @@ export function FileExplorerSidebar({
                   onClick={() => handleUploadClick('')}
                 >
                   <HugeiconsIcon icon={Upload01Icon} size={16} />
-                  Upload
+                  Upload files
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleUploadFolderClick('')}
+                >
+                  <HugeiconsIcon icon={Folder01Icon} size={16} />
+                  Upload folder
                 </Button>
               </div>
             </div>
@@ -512,6 +585,13 @@ export function FileExplorerSidebar({
         className="hidden"
         onChange={handleUploadChange}
       />
+      <input
+        ref={folderUploadInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={handleUploadChange}
+      />
 
       {contextMenu ? (
         <div
@@ -529,6 +609,15 @@ export function FileExplorerSidebar({
           </button>
           {contextMenu.entry.type === 'folder' ? (
             <>
+              <button
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 hover:bg-primary-100"
+                onClick={() => {
+                  void handleDownload(contextMenu.entry)
+                  setContextMenu(null)
+                }}
+              >
+                <HugeiconsIcon icon={Download01Icon} size={16} /> Download
+              </button>
               <button
                 className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 hover:bg-primary-100"
                 onClick={() => {
@@ -554,7 +643,16 @@ export function FileExplorerSidebar({
                   setContextMenu(null)
                 }}
               >
-                <HugeiconsIcon icon={Upload01Icon} size={16} /> Upload
+                <HugeiconsIcon icon={Upload01Icon} size={16} /> Upload files
+              </button>
+              <button
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 hover:bg-primary-100"
+                onClick={() => {
+                  handleUploadFolderClick(contextMenu.entry.path)
+                  setContextMenu(null)
+                }}
+              >
+                <HugeiconsIcon icon={Folder01Icon} size={16} /> Upload folder
               </button>
             </>
           ) : (

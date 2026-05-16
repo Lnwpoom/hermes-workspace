@@ -1,4 +1,5 @@
 import path from 'node:path'
+import os from 'node:os'
 import fs from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -75,6 +76,56 @@ function ensureWorkspacePath(input: string, workspaceRoot: string) {
 function toRelative(resolvedPath: string, workspaceRoot: string) {
   const relative = path.relative(workspaceRoot, resolvedPath)
   return relative || ''
+}
+
+function safeArchiveStem(value: string) {
+  const stem = value
+    .replace(/[^A-Za-z0-9._-]+/g, '_')
+    .replace(/^[._-]+|[._-]+$/g, '')
+  return stem || 'workspace'
+}
+
+function safeRelativeUploadPath(value: FormDataEntryValue | null) {
+  if (typeof value !== 'string' || !value.trim()) return null
+  const normalized = value.replace(/\\/g, '/').trim().replace(/^\/+/, '')
+  const parts = normalized.split('/').filter((part) => part && part !== '.')
+  if (
+    parts.length === 0 ||
+    parts.some((part) => part === '..' || path.posix.basename(part) !== part)
+  ) {
+    throw new Error('Invalid upload path')
+  }
+  return parts.join('/')
+}
+
+async function createDirectoryArchiveResponse(sourcePath: string) {
+  const archiveStem = safeArchiveStem(path.basename(sourcePath) || 'workspace')
+  const archivePath = path.join(
+    os.tmpdir(),
+    `hermes-workspace-${archiveStem}-${Date.now()}-${Math.random()
+      .toString(16)
+      .slice(2)}.tar.gz`,
+  )
+
+  await execFileAsync('tar', [
+    '-czf',
+    archivePath,
+    '-C',
+    path.dirname(sourcePath),
+    path.basename(sourcePath),
+  ])
+
+  try {
+    const buffer = await fs.readFile(archivePath)
+    return new Response(buffer, {
+      headers: {
+        'Content-Type': 'application/gzip',
+        'Content-Disposition': `attachment; filename="${archiveStem}.tar.gz"`,
+      },
+    })
+  } finally {
+    await fs.rm(archivePath, { force: true })
+  }
 }
 
 function sortEntries(entries: Array<FileEntry>) {
@@ -333,6 +384,10 @@ export const Route = createFileRoute('/api/files')({
           }
 
           if (action === 'download') {
+            const stats = await fs.stat(resolvedPath)
+            if (stats.isDirectory()) {
+              return await createDirectoryArchiveResponse(resolvedPath)
+            }
             const buffer = await fs.readFile(resolvedPath)
             return new Response(buffer, {
               headers: {
@@ -381,19 +436,24 @@ export const Route = createFileRoute('/api/files')({
                 const form = await request.formData()
                 const action = String(form.get('action') || 'upload')
                 if (action !== 'upload') {
-                  return json({ error: 'Invalid upload request' }, { status: 400 })
+                  return json(
+                    { error: 'Invalid upload request' },
+                    { status: 400 },
+                  )
                 }
                 const file = form.get('file')
                 const targetPath = String(form.get('path') || '')
                 if (!(file instanceof File)) {
                   return json({ error: 'Missing file' }, { status: 400 })
                 }
+                const relativePath = String(form.get('relativePath') || '')
                 const buffer = Buffer.from(await file.arrayBuffer())
                 return json(
                   await remoteWriteWorkspaceFile({
                     action: 'upload',
                     path: targetPath,
                     name: file.name,
+                    relativePath,
                     contentBase64: buffer.toString('base64'),
                   }),
                 )
@@ -433,14 +493,37 @@ export const Route = createFileRoute('/api/files')({
             if (!(file instanceof File)) {
               return json({ error: 'Missing file' }, { status: 400 })
             }
+            const relativeUploadPath = safeRelativeUploadPath(
+              form.get('relativePath'),
+            )
             const resolvedTarget = ensureWorkspacePath(
               targetPath,
               workspaceRoot,
             )
-            const isDir = (await fs.stat(resolvedTarget)).isDirectory()
-            const destination = isDir
-              ? path.join(resolvedTarget, file.name)
-              : resolvedTarget
+            let isDir = !targetPath.trim()
+            try {
+              isDir = (await fs.stat(resolvedTarget)).isDirectory()
+            } catch {
+              isDir = false
+            }
+            const baseDir = isDir
+              ? resolvedTarget
+              : path.dirname(resolvedTarget)
+            const fallbackFileName = path.basename(file.name)
+            if (!relativeUploadPath && !fallbackFileName) {
+              return json({ error: 'Missing file name' }, { status: 400 })
+            }
+            const destination = ensureWorkspacePath(
+              toRelative(
+                relativeUploadPath
+                  ? path.join(baseDir, relativeUploadPath)
+                  : isDir
+                    ? path.join(resolvedTarget, fallbackFileName)
+                    : resolvedTarget,
+                workspaceRoot,
+              ),
+              workspaceRoot,
+            )
             await fs.mkdir(path.dirname(destination), { recursive: true })
             const buffer = Buffer.from(await file.arrayBuffer())
             await fs.writeFile(destination, buffer)

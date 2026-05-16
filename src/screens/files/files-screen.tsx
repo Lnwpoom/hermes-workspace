@@ -1,4 +1,12 @@
-import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Fragment,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { cn } from '@/lib/utils'
 import { usePageTitle } from '@/hooks/use-page-title'
 import {
@@ -149,6 +157,21 @@ function formatDate(iso: string): string {
   })
 }
 
+function getDownloadFileName(response: Response, fallback: string) {
+  const disposition = response.headers.get('content-disposition') || ''
+  const encodedMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (encodedMatch?.[1]) {
+    try {
+      return decodeURIComponent(encodedMatch[1])
+    } catch {
+      return encodedMatch[1]
+    }
+  }
+
+  const quotedMatch = disposition.match(/filename="?([^";]+)"?/i)
+  return quotedMatch?.[1] || fallback
+}
+
 function getParentPath(pathValue: string): string {
   const parts = pathValue.replace(/\\/g, '/').split('/').filter(Boolean)
   if (parts.length <= 1) return ''
@@ -286,7 +309,10 @@ type HighlightToken = {
   kind: HighlightKind
 }
 
-const HIGHLIGHT_CLASS_BY_KIND: Record<Exclude<HighlightKind, 'plain'>, string> = {
+const HIGHLIGHT_CLASS_BY_KIND: Record<
+  Exclude<HighlightKind, 'plain'>,
+  string
+> = {
   comment: 'hl-comment',
   jsonKey: 'hl-key',
   keyword: 'hl-kw',
@@ -295,14 +321,19 @@ const HIGHLIGHT_CLASS_BY_KIND: Record<Exclude<HighlightKind, 'plain'>, string> =
   type: 'hl-type',
 }
 
-function pushHighlightToken(tokens: Array<HighlightToken>, text: string, kind: HighlightKind = 'plain') {
+function pushHighlightToken(
+  tokens: Array<HighlightToken>,
+  text: string,
+  kind: HighlightKind = 'plain',
+) {
   if (!text) return
   tokens.push({ text, kind })
 }
 
 function tokenizeJson(code: string): Array<HighlightToken> {
   const tokens: Array<HighlightToken> = []
-  const pattern = /("(?:[^"\\]|\\.)*")(\s*:)?|-?\d+\.?\d*|\b(?:true|false|null)\b/g
+  const pattern =
+    /("(?:[^"\\]|\\.)*")(\s*:)?|-?\d+\.?\d*|\b(?:true|false|null)\b/g
   let lastIndex = 0
 
   for (const match of code.matchAll(pattern)) {
@@ -339,7 +370,11 @@ function tokenizeCode(code: string): Array<HighlightToken> {
 
     if (value.startsWith('//') || value.startsWith('/*')) {
       pushHighlightToken(tokens, value, 'comment')
-    } else if (value.startsWith('"') || value.startsWith("'") || value.startsWith('`')) {
+    } else if (
+      value.startsWith('"') ||
+      value.startsWith("'") ||
+      value.startsWith('`')
+    ) {
       pushHighlightToken(tokens, value, 'string')
     } else if (/^-?\d+\.?\d*$/.test(value)) {
       pushHighlightToken(tokens, value, 'number')
@@ -700,7 +735,8 @@ function FilePanel({ selectedEntry }: FilePanelProps) {
   const isEditable = isEditableFile(fileName)
 
   const highlighted = useMemo<Array<ReactNode>>(
-    () => (isCode && !isMd && content ? highlightCodeContent(content, ext) : []),
+    () =>
+      isCode && !isMd && content ? highlightCodeContent(content, ext) : [],
     [isCode, isMd, content, ext],
   )
 
@@ -770,6 +806,21 @@ function FilePanel({ selectedEntry }: FilePanelProps) {
     }
   }, [selectedEntry, dirty, editValue, content, commitSave])
 
+  const handleDownload = useCallback(async () => {
+    if (!selectedEntry || selectedEntry.type !== 'file') return
+    const res = await fetch(
+      `/api/files?action=download&path=${encodeURIComponent(selectedEntry.path)}`,
+    )
+    if (!res.ok) return
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = getDownloadFileName(res, selectedEntry.name)
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }, [selectedEntry])
+
   // ── Diff Modal (always rendered so hooks stay consistent) ─────────────────
 
   const diffModal = (
@@ -829,13 +880,26 @@ function FilePanel({ selectedEntry }: FilePanelProps) {
         </span>
       </div>
       <div className="flex shrink-0 items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => void handleDownload()}
+        >
+          Download
+        </Button>
         {(isMd || isHtml) && !isImage && (
           <Button
             size="sm"
             variant="outline"
             onClick={() => setRawMode((v) => !v)}
           >
-            {rawMode ? (isHtml ? 'Preview HTML' : 'Preview') : (isHtml ? 'Raw HTML' : 'Raw')}
+            {rawMode
+              ? isHtml
+                ? 'Preview HTML'
+                : 'Preview'
+              : isHtml
+                ? 'Raw HTML'
+                : 'Raw'}
           </Button>
         )}
         {isEditable && (
@@ -973,7 +1037,9 @@ function FilePanel({ selectedEntry }: FilePanelProps) {
   // ── Code viewer (syntax highlighted) — also raw mode for md ───────────────
 
   if (isCode) {
-    const displayContent = isMd ? highlightCodeContent(content, 'md') : highlighted
+    const displayContent = isMd
+      ? highlightCodeContent(content, 'md')
+      : highlighted
     return (
       <>
         {diffModal}
@@ -1249,12 +1315,14 @@ export function FilesScreen() {
               <div className="space-y-1 px-3 py-2 text-xs text-red-500">
                 <div>{treeError}</div>
                 <div className="text-primary-400 dark:text-neutral-500">
-                  Check the server workspace catalog or HERMES_WORKSPACE_DIR; this browser no longer needs local folder access.
+                  Check the server workspace catalog or HERMES_WORKSPACE_DIR;
+                  this browser no longer needs local folder access.
                 </div>
               </div>
             ) : entries.length === 0 ? (
               <div className="px-3 py-2 text-xs text-primary-400 dark:text-neutral-500">
-                Server workspace is empty. Agent-created files will appear here after they are written to the configured workspace path.
+                Server workspace is empty. Agent-created files will appear here
+                after they are written to the configured workspace path.
               </div>
             ) : (
               entries
@@ -1366,7 +1434,8 @@ export function FilesScreen() {
               value={promptValue}
               onChange={(e) => setPromptValue(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.nativeEvent.isComposing) void handlePromptSubmit()
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing)
+                  void handlePromptSubmit()
               }}
               className="w-full rounded-md border border-primary-200 dark:border-neutral-700 bg-primary-50 dark:bg-neutral-900 px-3 py-2 text-sm text-primary-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-primary-300"
               autoFocus

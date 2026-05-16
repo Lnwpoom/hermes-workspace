@@ -36,6 +36,21 @@ function isTextFile(path: string) {
   return !isImageFile(path)
 }
 
+function getDownloadFileName(response: Response, fallback: string) {
+  const disposition = response.headers.get('content-disposition') || ''
+  const encodedMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (encodedMatch?.[1]) {
+    try {
+      return decodeURIComponent(encodedMatch[1])
+    } catch {
+      return encodedMatch[1]
+    }
+  }
+
+  const quotedMatch = disposition.match(/filename="?([^";]+)"?/i)
+  return quotedMatch?.[1] || fallback
+}
+
 type FilePreviewDialogProps = {
   path: string | null
   onClose: () => void
@@ -106,6 +121,21 @@ export default function FilePreviewDialog({
     onSaved()
   }, [content, onSaved, path])
 
+  const handleDownload = useCallback(async () => {
+    if (!path) return
+    const res = await fetch(
+      `/api/files?action=download&path=${encodeURIComponent(path)}`,
+    )
+    if (!res.ok) return
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = getDownloadFileName(res, path.split('/').pop() || 'file')
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }, [path])
+
   return (
     <DialogRoot
       open={Boolean(path)}
@@ -119,6 +149,13 @@ export default function FilePreviewDialog({
             {path || 'File'}
           </DialogTitle>
           <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => void handleDownload()}
+              disabled={!path || loading}
+            >
+              Download
+            </Button>
             {isTextFile(path || '') ? (
               <Button onClick={handleSave} disabled={!dirty || loading}>
                 Save
