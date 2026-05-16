@@ -25,8 +25,7 @@
  * See v2.3.0 plan.
  */
 import {
-  CLAUDE_DASHBOARD_URL,
-  fetchDashboardToken,
+  dashboardFetch as fetchDashboard,
 } from './gateway-capabilities'
 
 const PROXY_TIMEOUT_MS = 10_000
@@ -53,33 +52,12 @@ export type DashboardKanbanBoardResponse = {
   }>
 }
 
-/**
- * Build headers for dashboard kanban API calls. The plugin route is
- * unauthenticated by design (loopback only), but we still pass the
- * dashboard session token if we have one — some setups proxy the
- * dashboard behind auth that requires it.
- */
-async function buildHeaders(): Promise<Record<string, string>> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  }
-  try {
-    const token = await fetchDashboardToken()
-    if (token) headers.Authorization = `Bearer ${token}`
-  } catch {
-    // Token fetch is best-effort. The plugin route works without it
-    // on standard loopback installs.
-  }
-  return headers
-}
-
-function dashboardUrl(path: string, params: Record<string, string | undefined> = {}): string {
-  const base = CLAUDE_DASHBOARD_URL.replace(/\/+$/, '')
-  const url = new URL(`${base}${path}`)
+function dashboardPath(path: string, params: Record<string, string | undefined> = {}): string {
+  const url = new URL(path, 'http://hermes-workspace.local')
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== '') url.searchParams.set(key, value)
   }
-  return url.toString()
+  return `${url.pathname}${url.search}`
 }
 
 async function dashboardFetch<T>(
@@ -87,11 +65,12 @@ async function dashboardFetch<T>(
   init: RequestInit = {},
   params: Record<string, string | undefined> = {},
 ): Promise<T> {
-  const headers = await buildHeaders()
-  const res = await fetch(dashboardUrl(path, params), {
+  const headers = new Headers(init.headers)
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+  const res = await fetchDashboard(dashboardPath(path, params), {
     ...init,
-    headers: { ...headers, ...(init.headers || {}) },
-    signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
+    headers,
+    signal: init.signal ?? AbortSignal.timeout(PROXY_TIMEOUT_MS),
   })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
