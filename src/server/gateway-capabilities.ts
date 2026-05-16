@@ -276,14 +276,14 @@ export const BEARER_TOKEN = process.env.HERMES_API_TOKEN || process.env.CLAUDE_A
  * (the legacy path, which creates a brittle trust boundary — see #124).
  * When set, the workspace uses this directly and never parses HTML.
  *
- * NOTE: do NOT fall back to CLAUDE_API_TOKEN here. The gateway and the
- * upstream Hermes Agent dashboard use independent token schemes — the gateway
- * accepts a long-lived bearer (CLAUDE_API_TOKEN), while the dashboard
+ * NOTE: do NOT fall back to HERMES_API_TOKEN / CLAUDE_API_TOKEN here.
+ * The gateway and the upstream Hermes Agent dashboard use independent token
+ * schemes: the gateway accepts a long-lived API bearer, while the dashboard
  * issues an ephemeral session token at boot (web_server.py:_SESSION_TOKEN).
  * Treating them as interchangeable wedges the workspace into 401 loops on
  * /api/sessions, /api/skills, etc. against the official dashboard. If
- * CLAUDE_DASHBOARD_TOKEN isn't set, leave this empty and let
- * fetchDashboardToken() fall through to the HTML-scrape legacy path.
+ * HERMES_DASHBOARD_TOKEN isn't set, leave this empty and let
+ * fetchDashboardToken() fall through to dashboard session discovery.
  */
 const DASHBOARD_BEARER_TOKEN = process.env.HERMES_DASHBOARD_TOKEN || process.env.CLAUDE_DASHBOARD_TOKEN || ''
 const DASHBOARD_BRIDGE_TOKEN =
@@ -303,10 +303,10 @@ let loggedHtmlScrapeFallback = false
  * Resolve a bearer token for dashboard API calls.
  *
  * Lookup order:
- *   1.  CLAUDE_DASHBOARD_TOKEN / CLAUDE_API_TOKEN env (preferred)
- *   2.  Inline token injected into the dashboard's root HTML (legacy
- *      fallback — logs a deprecation warning; to be removed once all
- *      supported dashboards expose a first-class token endpoint). See #124.
+ *   1. HERMES_DASHBOARD_TOKEN / CLAUDE_DASHBOARD_TOKEN env (preferred)
+ *   2. Inline token injected into the dashboard's root HTML. In Railway
+ *      zero-fork deployments this discovery request is protected by the
+ *      X-Hermes-Bridge-Token service-to-service bridge header.
  */
 export async function fetchDashboardToken(options?: {
   force?: boolean
@@ -325,12 +325,18 @@ export async function fetchDashboardToken(options?: {
   dashboardTokenPromise = (async () => {
     if (!loggedHtmlScrapeFallback) {
       loggedHtmlScrapeFallback = true
-      console.warn(
-        '[gateway] CLAUDE_DASHBOARD_TOKEN is not set — falling back to the legacy ' +
-          'HTML-scrape token flow. This fallback will be removed in a future release. ' +
-          'Set CLAUDE_DASHBOARD_TOKEN (or CLAUDE_API_TOKEN) to a dashboard bearer ' +
-          'token to migrate. See #124.',
-      )
+      if (isSecureBridgeDeployment()) {
+        console.info(
+          '[gateway] HERMES_DASHBOARD_TOKEN is not set; using the protected ' +
+            'workspace-dashboard bridge for dashboard session discovery.',
+        )
+      } else {
+        console.warn(
+          '[gateway] HERMES_DASHBOARD_TOKEN/CLAUDE_DASHBOARD_TOKEN is not set — ' +
+            'falling back to dashboard HTML session-token discovery. Do not use ' +
+            'OPENROUTER_API_KEY here; provider keys are only for LLM calls.',
+        )
+      }
     }
     // Dashboard injects the session token inline on `/` (root), not on
     // `/index.html` which serves the raw Vite-built HTML without the token.

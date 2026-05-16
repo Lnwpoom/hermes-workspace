@@ -598,7 +598,8 @@ Key safeguards — most are on by default, the env vars below are for remote / D
 - `COOKIE_SECURE=1` — force the `Secure` cookie flag when terminating HTTPS at a proxy
 - `COOKIE_SECURE=0` — disable the `Secure` flag for plain-HTTP LAN deployments (`HOST=0.0.0.0` without HTTPS); without this, browsers silently drop session cookies and login fails (#149)
 - `TRUST_PROXY=1` — trust `x-forwarded-for` / `x-real-ip` (only set behind a sanitizing reverse proxy)
-- `HERMES_DASHBOARD_TOKEN` — explicit bearer for dashboard API (preferred over the legacy HTML-scrape fallback)
+- `HERMES_DASHBOARD_TOKEN` — explicit bearer for dashboard API when you have a real dashboard bearer token. Do not use OpenRouter/provider keys here.
+- `HERMES_DASHBOARD_BRIDGE_TOKEN` — service-to-service bridge token for Railway `/workspace-dashboard` and `/workspace-state`; match it with the main Hermes Agent service bridge token.
 - `HERMES_API_TOKEN` — bearer for the Hermes Agent gateway when started with `API_SERVER_KEY` (legacy `CLAUDE_API_TOKEN` still honored)
 - `HERMES_ALLOW_INSECURE_REMOTE=1` — bypass the fail-closed guard (not recommended)
 
