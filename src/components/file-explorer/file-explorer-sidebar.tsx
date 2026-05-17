@@ -37,6 +37,11 @@ export type FileEntry = {
   children?: Array<FileEntry>
 }
 
+type FileTreeResult = {
+  entries: Array<FileEntry>
+  base: string
+}
+
 type FileExplorerSidebarProps = {
   collapsed: boolean
   onToggle: () => void
@@ -81,9 +86,16 @@ function getParentPath(pathValue: string) {
   return parts.slice(0, -1).join('/')
 }
 
-function buildReference(pathValue: string) {
-  const normalized = normalizePath(pathValue)
-  return `See file: workspace/${normalized}`
+function buildReference(
+  pathValue: string,
+  workspaceBase: string,
+  entryType: FileEntry['type'] = 'file',
+) {
+  const normalized = normalizePath(pathValue).replace(/^\/+/, '')
+  const base = normalizePath(workspaceBase).replace(/\/+$/, '')
+  const label = entryType === 'folder' ? 'folder' : 'file'
+  if (base) return `See ${label}: ${base}/${normalized}`
+  return `See ${label}: workspace/${normalized}`
 }
 
 function getDownloadFileName(response: Response, fallback: string) {
@@ -101,11 +113,17 @@ function getDownloadFileName(response: Response, fallback: string) {
   return quotedMatch?.[1] || fallback
 }
 
-async function fetchFileTree(): Promise<Array<FileEntry>> {
+async function fetchFileTree(): Promise<FileTreeResult> {
   const res = await fetch('/api/files?action=list')
   if (!res.ok) throw new Error('Failed to load files')
-  const data = (await res.json()) as { entries?: Array<FileEntry> }
-  return Array.isArray(data.entries) ? data.entries : []
+  const data = (await res.json()) as {
+    entries?: Array<FileEntry>
+    base?: string
+  }
+  return {
+    entries: Array.isArray(data.entries) ? data.entries : [],
+    base: typeof data.base === 'string' ? data.base : '',
+  }
 }
 
 function filterTree(entries: Array<FileEntry>, term: string): Array<FileEntry> {
@@ -137,6 +155,7 @@ export function FileExplorerSidebar({
   className,
 }: FileExplorerSidebarProps) {
   const [entries, setEntries] = useState<Array<FileEntry>>([])
+  const [workspaceBase, setWorkspaceBase] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -153,8 +172,9 @@ export function FileExplorerSidebar({
     setLoading(true)
     setError(null)
     try {
-      const nextEntries = await fetchFileTree()
-      setEntries(nextEntries)
+      const nextTree = await fetchFileTree()
+      setEntries(nextTree.entries)
+      setWorkspaceBase(nextTree.base)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -358,10 +378,10 @@ export function FileExplorerSidebar({
         toggleFolder(entry.path)
         return
       }
-      onInsertReference(buildReference(entry.path))
+      onInsertReference(buildReference(entry.path, workspaceBase, entry.type))
       setPreviewPath(entry.path)
     },
-    [onInsertReference, toggleFolder],
+    [onInsertReference, toggleFolder, workspaceBase],
   )
 
   const renderEntry = useCallback(
@@ -598,6 +618,27 @@ export function FileExplorerSidebar({
           className="fixed z-50 min-w-[160px] rounded-lg bg-primary-50 p-1 text-sm text-primary-900 shadow-lg outline outline-primary-900/10"
           style={{ top: contextMenu.y, left: contextMenu.x }}
         >
+          <button
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 hover:bg-primary-100"
+            onClick={() => {
+              onInsertReference(
+                buildReference(
+                  contextMenu.entry.path,
+                  workspaceBase,
+                  contextMenu.entry.type,
+                ),
+              )
+              setContextMenu(null)
+            }}
+          >
+            <HugeiconsIcon
+              icon={
+                contextMenu.entry.type === 'folder' ? Folder01Icon : File01Icon
+              }
+              size={16}
+            />{' '}
+            Insert reference
+          </button>
           <button
             className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 hover:bg-primary-100"
             onClick={() => {
